@@ -1,7 +1,9 @@
 fastapi
 uvicorn
-httpx
 pydantic
-python-multipart
 pytest
 pandas
+numpy
+scikit-learn
+nba_api
+joblib
