@@ -1,44 +1,137 @@
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from app.services.external import find_player_id_by_name
-from app.services.external import get_last_season_averages
-from app.services.external import get_player_age
-from app.services.external import get_player_position
+from app.schemas import CareerResponse, PlayerSearchResult, PlayerSummaryResponse, RetrainRequest, SimulateRequest
+from app.services.external import (
+    find_player_id_by_name,
+    find_players_by_name,
+    get_career_stats,
+    get_last_season_averages,
+    get_name,
+    get_player_age,
+    get_player_position,
+)
+from app.services.model_store import ModelStore
+from app.services.sim import simulate_player
+from app.services.trainer import train_model
 
-app = FastAPI()
+app = FastAPI(title="NBA Player Simulator API", version="2.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# serve the html page 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+store = ModelStore()
 
 
-@app.get("/")
-def home():
-    return FileResponse("static/index.html")
+def load_or_train_model():
+    try:
+        return store.load()
+    except FileNotFoundError:
+        output = train_model()
+        metadata = store.save(output.artifact, output.metadata)
+        return store.load(metadata["version"])
 
-@app.get("/api/player")
-def get_player(name: str):
+
+@app.get("/api/health")
+def health() -> dict:
+    return {"ok": True}
+
+
+@app.get("/api/models/current")
+def get_current_model() -> dict:
+    loaded = load_or_train_model()
+    return {"version": loaded.version, "metadata": loaded.metadata}
+
+
+@app.post("/api/models/retrain")
+def retrain_model(payload: RetrainRequest) -> dict:
+    output = train_model(start_year=payload.start_year, end_year=payload.end_year)
+    metadata = store.save(output.artifact, output.metadata)
+    return {"status": "retrained", "version": metadata["version"], "metadata": metadata}
+
+
+@app.get("/api/players/search", response_model=list[PlayerSearchResult])
+def search_players(query: str) -> list[PlayerSearchResult]:
+    if not query.strip():
+        return []
+    return [PlayerSearchResult(**p) for p in find_players_by_name(query, limit=10)]
+
+
+@app.get("/api/player", response_model=PlayerSummaryResponse)
+def get_player_summary(name: str) -> PlayerSummaryResponse:
     player_id = find_player_id_by_name(name)
     if player_id is None:
-        return {"error": "Player not found"}
-    
+        raise HTTPException(status_code=404, detail="Player not found")
+
     stats = get_last_season_averages(player_id)
     if stats is None:
-        return {"error": "Stats not found"}
-    
+        raise HTTPException(status_code=404, detail="Stats not found")
+
     age = get_player_age(player_id, stats["season"])
     position = get_player_position(player_id)
-    
-    return {
-        "name": name,
-        "age": age,
-        "position": position,
-        "ppg": stats["ppg"],
-        "rpg": stats["rpg"],
-        "apg": stats["apg"],
-        "spg": stats["spg"],
-        "bpg": stats["bpg"],
-        "fg_pct": stats["fg_pct"],
-        "fg3_pct": stats["fg3_pct"],
-    }
+    player_name = get_name(player_id)
+    return PlayerSummaryResponse(
+        player_id=player_id,
+        name=player_name,
+        age=age,
+        position=position,
+        latest_season=stats["season"],
+        latest_per_game=stats,
+    )
+
+
+@app.get("/api/players/{player_id}/career", response_model=CareerResponse)
+def get_player_career(player_id: int) -> CareerResponse:
+    career = get_career_stats(player_id)
+    if not career:
+        raise HTTPException(status_code=404, detail="Career stats not found")
+    return CareerResponse(
+        player_id=player_id,
+        name=get_name(player_id),
+        position=get_player_position(player_id),
+        seasons_played=len(career),
+        seasons=career,
+    )
+
+
+@app.post("/api/simulate")
+def simulate(payload: SimulateRequest) -> dict:
+    loaded = load_or_train_model()
+    try:
+        result = simulate_player(
+            loaded_model=loaded,
+            player_id=payload.player_id,
+            start_season=payload.start_season,
+            simulations=payload.simulations,
+            realism_profile=payload.realism_profile,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+frontend_dist = Path("frontend/dist")
+if frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
+
+    @app.get("/")
+    def home() -> FileResponse:
+        return FileResponse(frontend_dist / "index.html")
+
+else:
+    @app.get("/")
+    def home_dev() -> JSONResponse:
+        return JSONResponse(
+            {
+                "message": "Frontend build not found. Run `npm install && npm run build` inside `frontend/`.",
+            }
+        )
 
