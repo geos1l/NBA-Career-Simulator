@@ -56,11 +56,22 @@ def season_label(start_year: int) -> str:
     return f"{start_year}-{end_short}"
 
 
+NBA_API_TIMEOUT = 90
+
 def _build_training_rows(start_year: int, end_year: int) -> pd.DataFrame:
+    import time
     by_season: Dict[int, pd.DataFrame] = {}
     for year in range(start_year, end_year + 1):
         label = season_label(year)
-        frame = get_league_season_per_game(label, min_gp=20)
+        for attempt in range(2):
+            try:
+                frame = get_league_season_per_game(label, min_gp=20, timeout=NBA_API_TIMEOUT)
+                break
+            except Exception as e:
+                if "timed out" in str(e).lower() and attempt == 0:
+                    time.sleep(2)
+                    continue
+                raise
         if frame.empty:
             continue
         frame = frame.copy()

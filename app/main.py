@@ -51,11 +51,40 @@ def get_current_model() -> dict:
     return {"version": loaded.version, "metadata": loaded.metadata}
 
 
+def _json_safe(obj: dict) -> dict:
+    """Return a copy of the dict with only JSON-serializable values (no numpy, Path, etc.)."""
+
+    def _val(x):
+        if isinstance(x, dict):
+            return _json_safe(x)
+        if isinstance(x, (list, tuple)):
+            return [_val(i) for i in x]
+        if hasattr(x, "item"):  # numpy scalar
+            return x.item()
+        if isinstance(x, (str, int, float, bool)) or x is None:
+            return x
+        return str(x)
+
+    return {k: _val(v) for k, v in obj.items()}
+
+
 @app.post("/api/models/retrain")
 def retrain_model(payload: RetrainRequest) -> dict:
-    output = train_model(start_year=payload.start_year, end_year=payload.end_year)
-    metadata = store.save(output.artifact, output.metadata)
-    return {"status": "retrained", "version": metadata["version"], "metadata": metadata}
+    try:
+        output = train_model(start_year=payload.start_year, end_year=payload.end_year)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Training failed: {e!s}") from e
+    try:
+        metadata = store.save(output.artifact, output.metadata)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Save failed: {e!s}") from e
+    try:
+        safe_meta = _json_safe(metadata)
+        return {"status": "retrained", "version": metadata["version"], "metadata": safe_meta}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model saved but response failed: {e!s}") from e
 
 
 @app.get("/api/players/search", response_model=list[PlayerSearchResult])

@@ -200,10 +200,13 @@ def get_last_season_averages(player_id: int) -> Optional[Dict[str, Any]]:
     }
 
 
-def get_league_season_per_game(season_label: str, min_gp: int = 20) -> pd.DataFrame:
+def get_league_season_per_game(
+    season_label: str, min_gp: int = 20, timeout: int = 90
+) -> pd.DataFrame:
     frame = leaguedashplayerstats.LeagueDashPlayerStats(
         season=season_label,
         per_mode_detailed="PerGame",
+        timeout=timeout,
     ).get_data_frames()[0]
     if frame.empty:
         return frame

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PlayerSearchResult(BaseModel):
@@ -36,6 +36,22 @@ class SimulateRequest(BaseModel):
 
 
 class RetrainRequest(BaseModel):
-    start_year: int = Field(default=2000, ge=1979, le=2050)
-    end_year: Optional[int] = Field(default=None, ge=1979, le=2055)
+    start_year: int = Field(
+        default=2000,
+        ge=1979,
+        le=2050,
+        description="First season to include (e.g. 2000 = from 2000-01 onward). Must be <= end_year.",
+    )
+    end_year: Optional[int] = Field(
+        default=None,
+        ge=1979,
+        le=2055,
+        description="Last season to include. Omit for 'current year - 2'. Must be >= start_year.",
+    )
+
+    @model_validator(mode="after")
+    def start_before_end(self) -> "RetrainRequest":
+        if self.end_year is not None and self.start_year > self.end_year:
+            raise ValueError("start_year must be <= end_year")
+        return self
 
