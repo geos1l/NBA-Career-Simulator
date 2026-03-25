@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getCareer, getModelInfo, searchPlayers, simulateCareer } from "./api";
+import { getCareer, getModelInfo, searchPlayers, simulateCareerStream } from "./api";
 import {
   Line,
   LineChart,
@@ -23,23 +23,13 @@ const metricHeaders = [
   { key: "ft_pct", label: "FT%" }
 ];
 
-const featuredPlayers = [
-  { id: 2544, full_name: "LeBron James", is_active: true },
-  { id: 201939, full_name: "Stephen Curry", is_active: true },
-  { id: 203954, full_name: "Joel Embiid", is_active: true },
-  { id: 202681, full_name: "Kyrie Irving", is_active: true },
-  { id: 202691, full_name: "Klay Thompson", is_active: true },
-  { id: 1629029, full_name: "Luka Doncic", is_active: true },
-  { id: 1628369, full_name: "Jayson Tatum", is_active: true },
-  { id: 203507, full_name: "Giannis Antetokounmpo", is_active: true },
-  { id: 203081, full_name: "Damian Lillard", is_active: true },
-  { id: 201565, full_name: "Derrick Rose", is_active: false }
-];
 
 const chartMetricOptions = [
   { key: "ppg", label: "Points Per Game" },
   { key: "apg", label: "Assists Per Game" },
   { key: "rpg", label: "Rebounds Per Game" },
+  { key: "spg", label: "Steals Per Game" },
+  { key: "bpg", label: "Blocks Per Game" },
   { key: "mpg", label: "Minutes Per Game" },
   { key: "fg_pct", label: "FG%" },
   { key: "ts_pct", label: "TS%" },
@@ -56,7 +46,7 @@ function num(value) {
 
 function App() {
   const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState(featuredPlayers);
+  const [matches, setMatches] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selected, setSelected] = useState(null);
   const [career, setCareer] = useState(null);
@@ -65,21 +55,26 @@ function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
-  const [simProgress, setSimProgress] = useState(0);
   const [modelInfo, setModelInfo] = useState(null);
   const [selectedChartMetric, setSelectedChartMetric] = useState("ppg");
+  const [tableView, setTableView] = useState("real"); // "real" or "simulated"
+  /** null = indeterminate bar; number = real % from server (simulate stream). */
+  const [loadProgress, setLoadProgress] = useState(null);
+  const [loadSubtext, setLoadSubtext] = useState("");
   const searchRef = useRef(null);
-  const progressTimerRef = useRef(null);
 
   const chartData = useMemo(() => {
     if (!career) {
       return [];
     }
 
+    const firstYear = Number(career.seasons[0]?.season_start ?? 0);
+
     if (!simResult) {
-      return career.seasons.map((season) => ({
+      return career.seasons.map((season, i) => ({
         seasonKey: season.season_start,
         label: season.season_label,
+        yearInLeague: `Year ${i + 1}`,
         historical: getMetricValueFromSeason(season, selectedChartMetric),
         reality: null,
         projected: null
@@ -94,6 +89,7 @@ function App() {
       byYear.set(year, {
         seasonKey: year,
         label: season.season_label,
+        yearInLeague: `Year ${year - firstYear + 1}`,
         historical: year <= startYear ? getMetricValueFromSeason(season, selectedChartMetric) : null,
         reality: year >= startYear ? getMetricValueFromSeason(season, selectedChartMetric) : null,
         projected: null
@@ -109,6 +105,7 @@ function App() {
         byYear.set(year, {
           seasonKey: year,
           label: `${year}-${String((year + 1) % 100).padStart(2, "0")}`,
+          yearInLeague: `Year ${year - firstYear + 1}`,
           historical: null,
           reality: null,
           projected: getMetricValueFromProjection(row, selectedChartMetric)
@@ -116,16 +113,14 @@ function App() {
       }
     });
 
-    return Array.from(byYear.values()).sort((a, b) => a.seasonKey - b.seasonKey);
-  }, [career, selectedChartMetric, simResult]);
+    const sorted = Array.from(byYear.values()).sort((a, b) => a.seasonKey - b.seasonKey);
+    const pivot = sorted.find((d) => d.seasonKey === startYear);
+    if (pivot && pivot.historical != null) {
+      pivot.projected = pivot.historical;
+    }
 
-  useEffect(() => {
-    return () => {
-      if (progressTimerRef.current) {
-        clearInterval(progressTimerRef.current);
-      }
-    };
-  }, []);
+    return sorted;
+  }, [career, selectedChartMetric, simResult]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -141,7 +136,7 @@ function App() {
   useEffect(() => {
     const trimmed = query.trim();
     if (!trimmed) {
-      setMatches(featuredPlayers);
+      setMatches([]);
       return undefined;
     }
 
@@ -152,34 +147,23 @@ function App() {
       } catch {
         setMatches([]);
       }
-    }, 220);
+    }, 100);
 
     return () => clearTimeout(timeout);
   }, [query]);
 
-  function startProgress(labelText) {
+  function startProgress(labelText, mode = "indeterminate") {
     setBusy(true);
     setBusyLabel(labelText);
-    setSimProgress(7);
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-    }
-    progressTimerRef.current = setInterval(() => {
-      setSimProgress((prev) => (prev >= 92 ? prev : prev + 3));
-    }, 300);
+    setLoadSubtext("");
+    setLoadProgress(mode === "determinate" ? 0 : null);
   }
 
   function completeProgress() {
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
-    setSimProgress(100);
-    setTimeout(() => {
-      setBusy(false);
-      setBusyLabel("");
-      setSimProgress(0);
-    }, 220);
+    setBusy(false);
+    setBusyLabel("");
+    setLoadProgress(null);
+    setLoadSubtext("");
   }
 
   async function handleSelect(player) {
@@ -215,15 +199,27 @@ function App() {
     if (!selected || !simStartSeason) {
       return;
     }
-    startProgress("Simulating career...");
+    startProgress("Simulating career…", "determinate");
     setError("");
     try {
-      const result = await simulateCareer({
-        player_id: selected.id,
-        start_season: Number(simStartSeason),
-        simulations: 250,
-        realism_profile: "arcade"
-      });
+      const result = await simulateCareerStream(
+        {
+          player_id: selected.id,
+          start_season: Number(simStartSeason),
+          simulations: 250
+        },
+        (ev) => {
+          if (ev.pct != null) setLoadProgress(ev.pct);
+          let sub = "";
+          if (ev.phase === "paths" && ev.done > 0 && ev.total != null) {
+            sub = `${ev.done}/${ev.total} paths`;
+            if (ev.eta_seconds != null) sub += ` · ~${ev.eta_seconds}s left`;
+          } else if (ev.message) {
+            sub = ev.message;
+          }
+          if (sub) setLoadSubtext(sub);
+        }
+      );
       setSimResult(result);
     } catch (err) {
       setError(err.message);
@@ -235,8 +231,8 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>NBA Player Simulator</h1>
-        <p>Injury-free projection engine with dynamic retirement and arcade-style variance.</p>
+        <h1 style={{ cursor: "pointer" }} onClick={() => { setSelected(null); setCareer(null); setSimResult(null); setQuery(""); setError(""); }}>NBA Career Simulator</h1>
+        <p>Monte Carlo projection engine with dynamic retirement modeling.</p>
       </header>
 
       <section className="searchBar" ref={searchRef}>
@@ -256,7 +252,7 @@ function App() {
         </form>
         {showDropdown && (
           <div className="searchDropdown">
-            <div className="dropdownTitle">{query.trim() ? "Suggestions" : "Featured Players"}</div>
+            <div className="dropdownTitle">{query.trim() ? "Suggestions" : "Start typing to search"}</div>
             {matches.length === 0 ? (
               <div className="dropdownEmpty">No players found.</div>
             ) : (
@@ -271,26 +267,42 @@ function App() {
         )}
       </section>
 
-      {!career && (
-        <section className="featuredPanel">
-          <h3>Quick Start</h3>
-          <p>Pick any featured player or type to search with autocomplete.</p>
-          <div className="featuredGrid">
-            {featuredPlayers.map((player) => (
-              <button key={player.id} className="featuredBtn" onClick={() => handleSelect(player)}>
-                {player.full_name}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
       {busy && (
-        <section className="loadingWrap">
+        <section className="loadingWrap" aria-busy="true" aria-live="polite">
           <div className="loadingText">{busyLabel || "Working..."}</div>
-          <div className="loadingBar">
-            <div className="loadingBarFill" style={{ width: `${simProgress}%` }} />
-          </div>
+          {loadProgress === null ? (
+            <>
+              <div
+                className="loadingBar loadingBarIndeterminate"
+                role="status"
+                aria-valuetext={busyLabel || "Loading"}
+              >
+                <div className="loadingBarShimmer" />
+              </div>
+              <div className="loadingHint">
+                No exact percent (waiting on the server / NBA API). Use Simulate for a real progress bar.
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className="loadingBar"
+                role="progressbar"
+                aria-valuenow={loadProgress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuetext={`${loadProgress}%`}
+              >
+                <div className="loadingBarFill" style={{ width: `${loadProgress}%` }} />
+              </div>
+              <div className="loadingPct">{loadProgress}%</div>
+              {loadSubtext ? <div className="loadingSubtext">{loadSubtext}</div> : null}
+              <div className="loadingHint">
+                Bar tracks completed simulation paths (and a short wrap-up). ETA is an estimate from recent speed.
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -317,6 +329,13 @@ function App() {
               {modelInfo && <small>Model: {modelInfo.version}</small>}
             </div>
 
+            {simResult && (
+              <div className="tableToggle">
+                <button className={tableView === "real" ? "active" : ""} onClick={() => setTableView("real")}>Real Career</button>
+                <button className={tableView === "simulated" ? "active" : ""} onClick={() => setTableView("simulated")}>Simulated Career</button>
+              </div>
+            )}
+
             <div className="tableWrap">
               <table>
                 <thead>
@@ -335,45 +354,148 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {career.seasons.map((s, index) => {
-                    const canStart = index >= 2;
-                    const isSelected = Number(simStartSeason) === Number(s.season_start);
+                  {(tableView === "real" || !simResult) &&
+                    career.seasons.map((s, index) => {
+                      const canStart = index >= 2;
+                      const isSelected = Number(simStartSeason) === Number(s.season_start);
+                      const isSimStart = simResult && Number(s.season_start) === Number(simResult.start_season);
+                      return (
+                        <tr
+                          key={s.season_label}
+                          className={`${canStart ? "clickableRow" : "disabledRow"} ${isSelected ? "selectedRow" : ""} ${isSimStart ? "simStartRow" : ""}`}
+                          onClick={() => {
+                            if (canStart) {
+                              setSimStartSeason(String(s.season_start));
+                            }
+                          }}
+                          title={canStart ? "Click to start simulation from this season" : "Need at least 3 seasons"}
+                        >
+                        <td className="seasonCell">
+                          {isSimStart && <span className="simStartMarker">SIM START</span>}
+                          {s.season_label}
+                          {!canStart && <small className="seasonHint">Locked</small>}
+                        </td>
+                        <td>{s.age ?? "-"}</td>
+                        <td>{s.gp}</td>
+                        <td>{num(s.per_game.ppg)}</td>
+                        <td>{num(s.per_game.rpg)}</td>
+                        <td>{num(s.per_game.apg)}</td>
+                        <td>{num(s.per_game.spg)}</td>
+                        <td>{num(s.per_game.bpg)}</td>
+                        <td>{num(s.per_game.tpg)}</td>
+                        <td>{num(s.per_game.mpg)}</td>
+                        <td>{pct(s.per_game.fg_pct)}</td>
+                        <td>{pct(s.per_game.fg3_pct)}</td>
+                        <td>{pct(s.per_game.ft_pct)}</td>
+                        <td>{num(s.totals.pts)}</td>
+                        <td>{num(s.totals.reb)}</td>
+                        <td>{num(s.totals.ast)}</td>
+                        <td>{pct(s.advanced.ts_pct)}</td>
+                        <td>{pct(s.advanced.efg_pct)}</td>
+                      </tr>
+                    );
+                  })}
+                  {tableView === "simulated" && simResult && (() => {
+                    // Pre-sim real seasons + projected seasons
+                    const startYear = Number(simResult.start_season);
+                    const preSim = career.seasons.filter((s) => Number(s.season_start) <= startYear);
                     return (
-                      <tr
-                        key={s.season_label}
-                        className={`${canStart ? "clickableRow" : "disabledRow"} ${isSelected ? "selectedRow" : ""}`}
-                        onClick={() => {
-                          if (canStart) {
-                            setSimStartSeason(String(s.season_start));
-                          }
-                        }}
-                        title={canStart ? "Click to start simulation from this season" : "Need at least 3 seasons"}
-                      >
-                      <td className="seasonCell">
-                        {s.season_label}
-                        {!canStart && <small className="seasonHint">Locked</small>}
-                      </td>
-                      <td>{s.age ?? "-"}</td>
-                      <td>{s.gp}</td>
-                      <td>{num(s.per_game.ppg)}</td>
-                      <td>{num(s.per_game.rpg)}</td>
-                      <td>{num(s.per_game.apg)}</td>
-                      <td>{num(s.per_game.spg)}</td>
-                      <td>{num(s.per_game.bpg)}</td>
-                      <td>{num(s.per_game.tpg)}</td>
-                      <td>{num(s.per_game.mpg)}</td>
-                      <td>{pct(s.per_game.fg_pct)}</td>
-                      <td>{pct(s.per_game.fg3_pct)}</td>
-                      <td>{pct(s.per_game.ft_pct)}</td>
-                      <td>{num(s.totals.pts)}</td>
-                      <td>{num(s.totals.reb)}</td>
-                      <td>{num(s.totals.ast)}</td>
-                      <td>{pct(s.advanced.ts_pct)}</td>
-                      <td>{pct(s.advanced.efg_pct)}</td>
-                    </tr>
-                  );
-                })}
+                      <>
+                        {preSim.map((s) => {
+                          const isSimStart = Number(s.season_start) === startYear;
+                          return (
+                            <tr key={s.season_label} className={isSimStart ? "simStartRow" : ""}>
+                              <td className="seasonCell">
+                                {isSimStart && <span className="simStartMarker">SIM START</span>}
+                                {s.season_label}
+                              </td>
+                              <td>{s.age ?? "-"}</td>
+                              <td>{s.gp}</td>
+                              <td>{num(s.per_game.ppg)}</td>
+                              <td>{num(s.per_game.rpg)}</td>
+                              <td>{num(s.per_game.apg)}</td>
+                              <td>{num(s.per_game.spg)}</td>
+                              <td>{num(s.per_game.bpg)}</td>
+                              <td>{num(s.per_game.tpg)}</td>
+                              <td>{num(s.per_game.mpg)}</td>
+                              <td>{pct(s.per_game.fg_pct)}</td>
+                              <td>{pct(s.per_game.fg3_pct)}</td>
+                              <td>{pct(s.per_game.ft_pct)}</td>
+                              <td>{num(s.totals.pts)}</td>
+                              <td>{num(s.totals.reb)}</td>
+                              <td>{num(s.totals.ast)}</td>
+                              <td>{pct(s.advanced.ts_pct)}</td>
+                              <td>{pct(s.advanced.efg_pct)}</td>
+                            </tr>
+                          );
+                        })}
+                        {simResult.paths_sample.map((s) => {
+                          const projYear = startYear + s.season_offset;
+                          const label = `${projYear}-${String((projYear + 1) % 100).padStart(2, "0")}`;
+                          return (
+                            <tr key={`proj-${s.season_offset}`} className="projectedRow">
+                              <td className="seasonCell">{label}</td>
+                              <td>{s.age}</td>
+                              <td>{s.gp}</td>
+                              <td>{num(s.per_game.ppg)}</td>
+                              <td>{num(s.per_game.rpg)}</td>
+                              <td>{num(s.per_game.apg)}</td>
+                              <td>{num(s.per_game.spg)}</td>
+                              <td>{num(s.per_game.bpg)}</td>
+                              <td>{num(s.per_game.tpg)}</td>
+                              <td>{num(s.per_game.mpg)}</td>
+                              <td>{pct(s.per_game.fg_pct)}</td>
+                              <td>{pct(s.per_game.fg3_pct)}</td>
+                              <td>{pct(s.per_game.ft_pct)}</td>
+                              <td>{num(s.totals.pts)}</td>
+                              <td>{num(s.totals.reb)}</td>
+                              <td>{num(s.totals.ast)}</td>
+                              <td>{pct(s.advanced.ts_pct)}</td>
+                              <td>{pct(s.advanced.efg_pct)}</td>
+                            </tr>
+                          );
+                        })}
+                      </>
+                    );
+                  })()}
                 </tbody>
+                <tfoot>
+                  {(() => {
+                    const allSeasons = (tableView === "simulated" && simResult)
+                      ? [
+                          ...career.seasons.filter((s) => Number(s.season_start) <= Number(simResult.start_season)),
+                          ...simResult.paths_sample,
+                        ]
+                      : [...career.seasons];
+                    const n = allSeasons.length;
+                    if (n === 0) return null;
+                    const avg = (arr, fn) => arr.reduce((s, x) => s + fn(x), 0) / arr.length;
+                    const sum = (arr, fn) => arr.reduce((s, x) => s + fn(x), 0);
+                    const label = (tableView === "simulated" && simResult) ? "Simulated Career Totals / Avg" : "Career Totals / Avg";
+                    return (
+                      <tr className="careerAvgRow">
+                        <td className="seasonCell">{label}</td>
+                        <td>-</td>
+                        <td>{Math.round(avg(allSeasons, (s) => s.gp))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.ppg))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.rpg))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.apg))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.spg))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.bpg))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.tpg))}</td>
+                        <td>{num(avg(allSeasons, (s) => s.per_game.mpg))}</td>
+                        <td>{pct(avg(allSeasons, (s) => s.per_game.fg_pct))}</td>
+                        <td>{pct(avg(allSeasons, (s) => s.per_game.fg3_pct))}</td>
+                        <td>{pct(avg(allSeasons, (s) => s.per_game.ft_pct))}</td>
+                        <td>{Math.round(sum(allSeasons, (s) => s.totals.pts)).toLocaleString()}</td>
+                        <td>{Math.round(sum(allSeasons, (s) => s.totals.reb)).toLocaleString()}</td>
+                        <td>{Math.round(sum(allSeasons, (s) => s.totals.ast)).toLocaleString()}</td>
+                        <td>{pct(avg(allSeasons, (s) => s.advanced.ts_pct))}</td>
+                        <td>{pct(avg(allSeasons, (s) => s.advanced.efg_pct))}</td>
+                      </tr>
+                    );
+                  })()}
+                </tfoot>
               </table>
             </div>
 
@@ -393,16 +515,66 @@ function App() {
                   <LineChart data={chartData}>
                     <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={24} />
                     <YAxis domain={["auto", "auto"]} />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="historical" name="History (Pre-Sim)" stroke="#2e69ff" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="reality" name="Reality (Actual)" stroke="#34a853" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="projected" name="Simulation (P50)" stroke="#ff6a3d" strokeWidth={2} dot={false} />
+                    <Tooltip
+                      content={({ payload, active }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0]?.payload;
+                        if (!d) return null;
+                        // Deduplicate: if historical and projected are the same value (pivot point), just show historical
+                        const seen = new Map();
+                        for (const entry of payload) {
+                          if (entry.value == null) continue;
+                          const rounded = Number(entry.value).toFixed(3);
+                          if (!seen.has(rounded)) {
+                            seen.set(rounded, entry);
+                          }
+                        }
+                        return (
+                          <div style={{ background: "#fff", border: "1px solid #ccc", padding: "8px 12px", borderRadius: 4, fontSize: 12 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>{d.yearInLeague} ({d.label})</div>
+                            {[...seen.values()].map((entry) => (
+                              <div key={entry.dataKey} style={{ color: entry.color }}>
+                                {entry.name}: {typeof entry.value === "number" ? entry.value.toFixed(1) : entry.value}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="historical"
+                      name="History (pre-sim)"
+                      stroke="#1e3a8f"
+                      strokeWidth={2.5}
+                      dot={false}
+                      connectNulls
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="reality"
+                      name="Actual (post-start)"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="projected"
+                      name="Simulation (P50)"
+                      stroke="#c8102e"
+                      strokeWidth={2.5}
+                      dot={false}
+                      connectNulls
+                    />
                     {simResult && (
                       <ReferenceLine
                         x={`${simResult.start_season}-${String((simResult.start_season + 1) % 100).padStart(2, "0")}`}
-                        stroke="#111"
-                        strokeDasharray="4 4"
-                        label="Simulation Start"
+                        stroke="#64748b"
+                        strokeWidth={1.5}
+                        strokeDasharray="5 5"
+                        label={{ value: "Sim start", fill: "#64748b", fontSize: 11 }}
                       />
                     )}
                   </LineChart>
@@ -517,6 +689,8 @@ function getMetricValueFromProjection(row, metric) {
     ppg: "ppg",
     apg: "apg",
     rpg: "rpg",
+    spg: "spg",
+    bpg: "bpg",
     mpg: "mpg",
     fg_pct: "fg_pct"
   };

@@ -175,7 +175,52 @@ button:disabled {
 .loadingBarFill {
   height: 100%;
   background: linear-gradient(90deg, #1e50d2, #4995ff);
-  transition: width 0.3s ease-out;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Honest loading: indeterminate shimmer (no fake percentage). */
+.loadingBarIndeterminate {
+  position: relative;
+}
+
+.loadingBarShimmer {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  max-width: 200px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #4995ff, #1e50d2, #4995ff, transparent);
+  animation: loadingShimmer 1.1s ease-in-out infinite;
+}
+
+@keyframes loadingShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.loadingHint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8b95a8;
+  max-width: 460px;
+}
+
+.loadingPct {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2d3a50;
+}
+
+.loadingSubtext {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #5a6578;
+  max-width: 520px;
 }
 
 .workspace {
@@ -228,10 +273,9 @@ button:disabled {
 }
 
 .tableWrap {
-  max-height: 56vh;
-  overflow: auto;
   border: 1px solid #e5eaf3;
   border-radius: 10px;
+  overflow-x: auto;
 }
 
 table {
@@ -279,6 +323,69 @@ th {
   margin-left: 6px;
   font-size: 10px;
   color: #8f98ab;
+}
+
+.simStartRow {
+}
+
+.simStartMarker {
+  display: inline-block;
+  background: #c8102e;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 6px;
+  vertical-align: middle;
+  letter-spacing: 0.5px;
+}
+
+.tableToggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 8px;
+}
+
+.tableToggle button {
+  padding: 6px 16px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.tableToggle button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.tableToggle button:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+
+.tableToggle button.active {
+  background: #1e3a8f;
+  color: #fff;
+  border-color: #1e3a8f;
+}
+
+.projectedRow {
+  background: #fef8f8;
+  font-style: italic;
+}
+
+
+.careerAvgRow {
+  background: #f0f4ff;
+  font-weight: 600;
+  border-top: 2px solid #cbd5e1;
+}
+
+.careerAvgRow .seasonCell {
+  font-size: 11px;
 }
 
 .chartPanel {
