@@ -2,7 +2,21 @@ venv/
 __pycache__/
 *.pyc
 
+# Local data (SQLite DB, ingestion logs)
+data/
+
 frontend/node_modules/
 frontend/dist/
 
-artifacts/
+# Ignore artifacts; allow bundled baseline v1 + latest pointer (un-ignore each parent)
+artifacts/*
+!artifacts/models/
+artifacts/models/*
+!artifacts/models/simulator/
+artifacts/models/simulator/*
+!artifacts/models/simulator/v1/
+!artifacts/models/simulator/v1/**
+!artifacts/models/simulator/latest.json
+
+# md stuff for me
+IMPROVEMENTS.md
