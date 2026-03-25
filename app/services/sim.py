@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from statistics import median
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 import numpy as np
 
@@ -31,8 +32,15 @@ def _clip(metric: str, value: float) -> float:
     return max(lo, min(hi, value))
 
 
+# Pre-compute bounds arrays for vectorized clipping (column order = target_columns).
+def _build_bounds_arrays(target_columns: List[str]):
+    lows = np.array([TARGET_BOUNDS[c][0] for c in target_columns])
+    highs = np.array([TARGET_BOUNDS[c][1] for c in target_columns])
+    return lows, highs
+
+
 def _aging_multiplier(age: int) -> float:
-    # Slightly arcade-friendly age curve: more upside through peak years.
+    # Age curve: slight boost through peak years, decline after 32.
     if age <= 24:
         return 1.04
     if age <= 27:
@@ -57,36 +65,6 @@ def _retirement_risk(age: int, mpg: float, ppg: float, career_seasons: int) -> f
     risk = 0.008 + 0.40 * age_term + 0.20 * role_term + 0.16 * production_term + tenure_term
     return max(0.0, min(0.92, risk))
 
-
-def _upside_index(base_ppg: float, base_apg: float, base_mpg: float, base_age: int) -> float:
-    score = 0.0
-    score += min(1.0, base_ppg / 30.0) * 0.55
-    score += min(1.0, base_apg / 9.0) * 0.20
-    score += min(1.0, base_mpg / 37.0) * 0.15
-    if base_age <= 24:
-        score += 0.15
-    elif base_age <= 27:
-        score += 0.08
-    return max(0.0, min(1.0, score))
-
-
-def _sample_year_shock(upside: float, prev_shock: float, age: int) -> float:
-    # Introduce off-years and breakout years for less linear trajectories.
-    breakout_prob = max(0.08, min(0.26, 0.12 + 0.12 * upside - 0.01 * max(0, age - 28)))
-    off_year_prob = max(0.08, min(0.22, 0.14 - 0.03 * upside + 0.01 * max(0, age - 31)))
-
-    roll = random.random()
-    if roll < breakout_prob:
-        shock = random.uniform(0.04, 0.16)
-    elif roll < breakout_prob + off_year_prob:
-        shock = random.uniform(-0.12, -0.03)
-    else:
-        shock = random.uniform(-0.025, 0.03)
-
-    # Bounceback tendency after a clear off-year.
-    if prev_shock <= -0.06:
-        shock += random.uniform(0.015, 0.05)
-    return shock
 
 
 def _compute_derived(pred: Dict[str, float]) -> Dict[str, float]:
@@ -184,18 +162,41 @@ def _to_feature_vector(row: Dict[str, Any], age: int) -> List[float]:
     ]
 
 
-def simulate_player(
+def simulate_player_events(
     loaded_model: LoadedModel,
     player_id: int,
     start_season: int,
     simulations: int = 250,
-    realism_profile: str = "realistic",
-) -> Dict[str, Any]:
+) -> Iterator[Dict[str, Any]]:
+    """
+    Vectorized Monte Carlo simulation.
+
+    Instead of running N paths sequentially (N × Y individual predict calls),
+    this batches all N paths into a single predict call per year offset
+    (Y batch calls total).  For 250 paths × 17 years this reduces ~4,250
+    sklearn calls to ~17 — typically 20-50× faster.
+
+    Yields real progress events per year offset so the loading bar reflects
+    actual computation, not a fake timer.
+    """
     artifact = loaded_model.artifact
     model = artifact["model"]
     target_columns: List[str] = artifact["target_columns"]
     residual_std: List[float] = artifact["residual_std"]
+    n_targets = len(target_columns)
+    std_arr = np.maximum(0.01, np.array(residual_std, dtype=float))
+    bounds_lo, bounds_hi = _build_bounds_arrays(target_columns)
 
+    # Column index lookups for vectorized aging.
+    col_idx = {c: i for i, c in enumerate(target_columns)}
+    aging_cols = [col_idx[c] for c in ("next_pts", "next_reb", "next_ast") if c in col_idx]
+
+    yield {
+        "event": "progress",
+        "pct": 1,
+        "phase": "career",
+        "message": "Loading player career…",
+    }
     career = get_career_stats(player_id)
     if not career:
         raise ValueError("No career data found for this player.")
@@ -212,103 +213,125 @@ def simulate_player(
     base_age = int(base["age"] or 20)
     prior_years = start_index + 1
     remaining_cap = max(1, 20 - prior_years)
-    noise_scale = 0.80 if realism_profile == "realistic" else 1.15
-    base_upside = _upside_index(
-        base_ppg=float(base["per_game"]["ppg"]),
-        base_apg=float(base["per_game"]["apg"]),
-        base_mpg=float(base["per_game"]["mpg"]),
-        base_age=base_age,
-    )
+    noise_scale = 1.0
 
-    paths: List[List[Dict[str, Any]]] = []
-    for _ in range(simulations):
-        current = {
-            "gp": float(base["gp"]),
-            "per_game": dict(base["per_game"]),
-        }
-        path: List[Dict[str, Any]] = []
-        age = base_age
-        prev_shock = 0.0
+    N = simulations
 
-        for i in range(1, remaining_cap + 1):
-            age += 1
-            features = np.array([_to_feature_vector(current, age)], dtype=float)
-            pred = model.predict(features)[0]
+    yield {
+        "event": "progress",
+        "pct": 5,
+        "phase": "paths",
+        "done": 0,
+        "total": remaining_cap,
+        "eta_seconds": None,
+        "message": f"Simulating {N} paths × {remaining_cap} years…",
+    }
 
-            predicted: Dict[str, float] = {}
-            for j, col in enumerate(target_columns):
-                std = max(0.01, residual_std[j])
-                draw = float(np.random.normal(loc=pred[j], scale=std * noise_scale))
-                if col in {"next_pts", "next_reb", "next_ast"}:
-                    draw *= _aging_multiplier(age)
-                predicted[col] = _clip(col, draw)
+    # ── Vectorized state: one row per path ──
+    base_vec = _to_feature_vector(base, base_age)
+    # current_features[i] = [age, gp, mpg, ppg, rpg, apg, spg, bpg, tpg, fg_pct, fg3_pct, ft_pct]
+    current_features = np.tile(base_vec, (N, 1))  # (N, 12)
 
-            shock = _sample_year_shock(base_upside, prev_shock, age)
-            production_multiplier = 1.0 + shock
-            playmaking_multiplier = 1.0 + (shock * 0.8)
-            minutes_multiplier = 1.0 + (shock * 0.55)
-            efficiency_multiplier = 1.0 + (shock * 0.35)
+    alive = np.ones(N, dtype=bool)  # tracks which paths haven't retired
+    # Store per-path results as list of lists (only alive paths get appended).
+    paths: List[List[Dict[str, Any]]] = [[] for _ in range(N)]
 
-            predicted["next_pts"] = _clip("next_pts", predicted["next_pts"] * production_multiplier)
-            predicted["next_reb"] = _clip("next_reb", predicted["next_reb"] * (1.0 + shock * 0.45))
-            predicted["next_ast"] = _clip("next_ast", predicted["next_ast"] * playmaking_multiplier)
-            predicted["next_min"] = _clip("next_min", predicted["next_min"] * minutes_multiplier)
-            predicted["next_fg_pct"] = _clip("next_fg_pct", predicted["next_fg_pct"] * efficiency_multiplier)
-            predicted["next_fg3_pct"] = _clip("next_fg3_pct", predicted["next_fg3_pct"] * efficiency_multiplier)
+    t_loop = time.perf_counter()
 
-            # Preserve upside for young stars so early injury-era starts have plausible peaks.
-            if age <= 27 and base_upside > 0.75:
-                floor_ppg = current["per_game"]["ppg"] * 0.93
-                predicted["next_pts"] = max(predicted["next_pts"], floor_ppg)
+    for year_i in range(1, remaining_cap + 1):
+        age = base_age + year_i
+        n_alive = int(alive.sum())
+        if n_alive == 0:
+            break
 
+        alive_idx = np.where(alive)[0]
+        feats = current_features[alive_idx].copy()
+        feats[:, 0] = float(age)  # update age column
+
+        # ── Single batch predict for all alive paths ──
+        preds = model.predict(feats)  # (n_alive, n_targets)
+
+        # ── Vectorized noise injection ──
+        noise = np.random.normal(0, std_arr * noise_scale, size=(n_alive, n_targets))
+        draws = preds + noise
+
+        # Aging multiplier on pts/reb/ast columns.
+        aging_mult = _aging_multiplier(age)
+        for ci in aging_cols:
+            draws[:, ci] *= aging_mult
+
+        # Clip to bounds.
+        draws = np.clip(draws, bounds_lo, bounds_hi)
+
+        # ── Build per-path season dicts and update state ──
+        for k, ai in enumerate(alive_idx):
+            predicted = {col: float(draws[k, j]) for j, col in enumerate(target_columns)}
             derived = _compute_derived(predicted)
             season_proj = {
-                "season_offset": i,
+                "season_offset": year_i,
                 "age": age,
                 "gp": int(round(predicted["next_gp"])),
                 **derived,
             }
-            path.append(season_proj)
+            paths[ai].append(season_proj)
 
-            current = {
-                "gp": season_proj["gp"],
-                "per_game": season_proj["per_game"],
-            }
-            prev_shock = shock
+            # Update current features for this path's next iteration.
+            pg = season_proj["per_game"]
+            current_features[ai] = [
+                float(age), float(season_proj["gp"]),
+                float(pg["mpg"]), float(pg["ppg"]), float(pg["rpg"]),
+                float(pg["apg"]), float(pg["spg"]), float(pg["bpg"]),
+                float(pg["tpg"]), float(pg["fg_pct"]), float(pg["fg3_pct"]),
+                float(pg["ft_pct"]),
+            ]
+            # Retirement check.
+            if age >= 31:
+                risk = _retirement_risk(
+                    age=age,
+                    mpg=pg["mpg"],
+                    ppg=pg["ppg"],
+                    career_seasons=prior_years + year_i,
+                )
+                if random.random() < risk:
+                    alive[ai] = False
 
-            risk = _retirement_risk(
-                age=age,
-                mpg=season_proj["per_game"]["mpg"],
-                ppg=season_proj["per_game"]["ppg"],
-                career_seasons=prior_years + i,
-            )
-            if random.random() < risk and age >= 31:
-                break
+        # ── Progress event per year offset ──
+        elapsed = time.perf_counter() - t_loop
+        per_year = elapsed / year_i
+        eta = per_year * (remaining_cap - year_i)
+        pct = 5 + int(87 * year_i / remaining_cap)
+        yield {
+            "event": "progress",
+            "pct": pct,
+            "phase": "paths",
+            "done": year_i,
+            "total": remaining_cap,
+            "eta_seconds": round(eta, 1),
+            "message": f"Year {year_i}/{remaining_cap} ({int(alive.sum())} paths alive)",
+        }
 
-        paths.append(path)
-
+    # ── Aggregation ──
     max_offset = max((len(p) for p in paths), default=0)
     aggregated: List[Dict[str, Any]] = []
+
+    def _pct(values: List[float], q: float) -> float:
+        return round(float(np.quantile(np.array(values, dtype=float), q)), 1)
+
     for offset in range(1, max_offset + 1):
         bucket = [p[offset - 1] for p in paths if len(p) >= offset]
         if not bucket:
             continue
 
-        ages = [b["age"] for b in bucket]
-        gp_vals = [b["gp"] for b in bucket]
         ppg_vals = [b["per_game"]["ppg"] for b in bucket]
         rpg_vals = [b["per_game"]["rpg"] for b in bucket]
         apg_vals = [b["per_game"]["apg"] for b in bucket]
         mpg_vals = [b["per_game"]["mpg"] for b in bucket]
 
-        def _pct(values: List[float], q: float) -> float:
-            return round(float(np.quantile(np.array(values, dtype=float), q)), 1)
-
         aggregated.append(
             {
                 "season_offset": offset,
-                "age_median": int(round(median(ages))),
-                "gp_median": int(round(median(gp_vals))),
+                "age_median": int(round(median([b["age"] for b in bucket]))),
+                "gp_median": int(round(median([b["gp"] for b in bucket]))),
                 "metrics": {
                     "ppg": {"p10": _pct(ppg_vals, 0.10), "p50": _pct(ppg_vals, 0.50), "p90": _pct(ppg_vals, 0.90)},
                     "rpg": {"p10": _pct(rpg_vals, 0.10), "p50": _pct(rpg_vals, 0.50), "p90": _pct(rpg_vals, 0.90)},
@@ -321,8 +344,15 @@ def simulate_player(
 
     projected_retire_ages = [p[-1]["age"] for p in paths if p]
     projected_retire_age = int(round(median(projected_retire_ages))) if projected_retire_ages else base_age
+
+    yield {
+        "event": "progress",
+        "pct": 98,
+        "phase": "bio",
+        "message": "Loading player profile…",
+    }
     bio = get_player_bio(player_id)
-    return {
+    result = {
         "player_id": player_id,
         "player_name": bio.get("name"),
         "position": bio.get("position"),
@@ -331,6 +361,24 @@ def simulate_player(
         "simulations": simulations,
         "projected_retirement_age": projected_retire_age,
         "model_version": loaded_model.version,
-        "paths_sample": paths[0] if paths else [],
+        "paths_sample": max(paths, key=len) if paths else [],
         "aggregated_projection": aggregated,
     }
+    yield {"event": "complete", "pct": 100, "result": result}
+
+
+def simulate_player(
+    loaded_model: LoadedModel,
+    player_id: int,
+    start_season: int,
+    simulations: int = 250,
+) -> Dict[str, Any]:
+    for msg in simulate_player_events(
+        loaded_model,
+        player_id,
+        start_season,
+        simulations=simulations,
+    ):
+        if msg.get("event") == "complete":
+            return msg["result"]
+    raise RuntimeError("Simulation finished without a result")

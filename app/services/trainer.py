@@ -177,6 +177,7 @@ def train_model(start_year: int = 2000, end_year: int | None = None) -> TrainOut
 
 
 def ensure_trained_model(store: ModelStore) -> Dict[str, Any]:
+    """Load existing model or train+save (for scripts/CLI only — the API uses load-only paths)."""
     try:
         loaded = store.load()
         return {"status": "loaded", "version": loaded.version, "metadata": loaded.metadata}
