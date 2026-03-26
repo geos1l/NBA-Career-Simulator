@@ -18,5 +18,5 @@ artifacts/models/simulator/*
 !artifacts/models/simulator/v1/**
 !artifacts/models/simulator/latest.json
 
-# md stuff for me
+# md stuff
 IMPROVEMENTS.md
