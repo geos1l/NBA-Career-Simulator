@@ -50,15 +50,29 @@ STAT_LABELS = {
 }
 
 
+def _delta_str(new_val: float, old_val: float, lower_is_better: bool = True) -> str:
+    """Return arrow + delta string. ▼ = improved, ▲ = worse."""
+    delta = new_val - old_val
+    if lower_is_better:
+        arrow = "▼" if delta < -0.001 else ("▲" if delta > 0.001 else "═")
+    else:
+        arrow = "▼" if delta > 0.001 else ("▲" if delta < -0.001 else "═")
+    return f"{arrow}{abs(delta):>6.3f}"
+
+
 def print_comparison_table(
     target_cols: list[str],
     new_metrics: dict,
     old_metrics: dict | None,
 ) -> None:
     """Print a formatted comparison table of MAE / RMSE / R² per stat."""
-    header = f"{'Stat':<6} {'MAE':>7} {'RMSE':>7} {'R²':>7}"
     if old_metrics:
-        header += f"  │ {'Old MAE':>7} {'Δ MAE':>7}"
+        header = (f"{'Stat':<6} "
+                  f"{'MAE':>7} {'old':>7} {'Δ':>7}  │ "
+                  f"{'RMSE':>7} {'old':>7} {'Δ':>7}  │ "
+                  f"{'R²':>7} {'old':>7} {'Δ':>7}")
+    else:
+        header = f"{'Stat':<6} {'MAE':>7} {'RMSE':>7} {'R²':>7}"
     print("\n" + "=" * len(header))
     print(header)
     print("-" * len(header))
@@ -68,25 +82,29 @@ def print_comparison_table(
         mae = new_metrics["mae"][col]
         rmse = new_metrics["rmse"][col]
         r2 = new_metrics["r2"][col]
-        row = f"{label:<6} {mae:>7.3f} {rmse:>7.3f} {r2:>7.3f}"
-        if old_metrics and col in old_metrics.get("mae", {}):
+        if old_metrics and col in old_metrics["mae"]:
             old_mae = old_metrics["mae"][col]
-            delta = mae - old_mae
-            arrow = "▼" if delta < -0.001 else ("▲" if delta > 0.001 else "═")
-            row += f"  │ {old_mae:>7.3f} {arrow}{abs(delta):>6.3f}"
+            old_rmse = old_metrics["rmse"][col]
+            old_r2 = old_metrics["r2"][col]
+            row = (f"{label:<6} "
+                   f"{mae:>7.3f} {old_mae:>7.3f} {_delta_str(mae, old_mae):>7}  │ "
+                   f"{rmse:>7.3f} {old_rmse:>7.3f} {_delta_str(rmse, old_rmse):>7}  │ "
+                   f"{r2:>7.3f} {old_r2:>7.3f} {_delta_str(r2, old_r2, lower_is_better=False):>7}")
+        else:
+            row = f"{label:<6} {mae:>7.3f} {rmse:>7.3f} {r2:>7.3f}"
         print(row)
 
     # Averages
-    avg_mae = np.mean([new_metrics["mae"][c] for c in target_cols])
-    avg_rmse = np.mean([new_metrics["rmse"][c] for c in target_cols])
-    avg_r2 = np.mean([new_metrics["r2"][c] for c in target_cols])
+    avg = {k: np.mean([new_metrics[k][c] for c in target_cols]) for k in ("mae", "rmse", "r2")}
     print("-" * len(header))
-    avg_row = f"{'AVG':<6} {avg_mae:>7.3f} {avg_rmse:>7.3f} {avg_r2:>7.3f}"
     if old_metrics:
-        old_avg = np.mean([old_metrics["mae"].get(c, 0) for c in target_cols])
-        delta = avg_mae - old_avg
-        arrow = "▼" if delta < -0.001 else ("▲" if delta > 0.001 else "═")
-        avg_row += f"  │ {old_avg:>7.3f} {arrow}{abs(delta):>6.3f}"
+        old_avg = {k: np.mean([old_metrics[k][c] for c in target_cols]) for k in ("mae", "rmse", "r2")}
+        avg_row = (f"{'AVG':<6} "
+                   f"{avg['mae']:>7.3f} {old_avg['mae']:>7.3f} {_delta_str(avg['mae'], old_avg['mae']):>7}  │ "
+                   f"{avg['rmse']:>7.3f} {old_avg['rmse']:>7.3f} {_delta_str(avg['rmse'], old_avg['rmse']):>7}  │ "
+                   f"{avg['r2']:>7.3f} {old_avg['r2']:>7.3f} {_delta_str(avg['r2'], old_avg['r2'], lower_is_better=False):>7}")
+    else:
+        avg_row = f"{'AVG':<6} {avg['mae']:>7.3f} {avg['rmse']:>7.3f} {avg['r2']:>7.3f}"
     print(avg_row)
     print("=" * len(header))
     print("▼ = improved, ▲ = worse, ═ = same")
@@ -118,23 +136,21 @@ def main() -> None:
     version = args.version or datetime.now(tz=timezone.utc).strftime("v%Y%m%dT%H%M%SZ")
     store = ModelStore()
 
-    # ── Load current active model metrics for comparison ──
-    old_metrics = None
+    # ── Load current active model for comparison ──
+    old_model = None
     try:
         current = store.load()
-        old_mae = current.metadata.get("validation_mae", {})
-        if old_mae:
-            old_metrics = {"mae": old_mae}
-            print(f"Current active model: {current.version}")
+        old_model = current
+        print(f"Current active model: {current.version}")
     except FileNotFoundError:
         print("No existing model found — training from scratch.")
 
     # ── Build training data ──
-    print(f"\nFetching training data: seasons {args.start_year}–{end_year}...")
+    print(f"\nLoading training data from local DB: seasons {args.start_year}–{end_year}...")
     t0 = time.perf_counter()
     frame = _build_training_rows(start_year=args.start_year, end_year=end_year)
     if frame.empty:
-        print("ERROR: No training data. Check nba_api network access.")
+        print("ERROR: No training data. Run scripts/ingest_data.py first.")
         sys.exit(1)
     t_data = time.perf_counter() - t0
     print(f"  {len(frame)} training rows in {t_data:.1f}s")
@@ -172,6 +188,19 @@ def main() -> None:
         new_metrics["mae"][col] = float(mean_absolute_error(y_val[:, i], y_pred[:, i]))
         new_metrics["rmse"][col] = float(np.sqrt(mean_squared_error(y_val[:, i], y_pred[:, i])))
         new_metrics["r2"][col] = float(r2_score(y_val[:, i], y_pred[:, i]))
+
+    # ── Evaluate old model on same val split for full comparison ──
+    old_metrics = None
+    if old_model is not None:
+        try:
+            old_y_pred = old_model.artifact["model"].predict(X_val)
+            old_metrics = {"mae": {}, "rmse": {}, "r2": {}}
+            for i, col in enumerate(TARGET_COLUMNS):
+                old_metrics["mae"][col] = float(mean_absolute_error(y_val[:, i], old_y_pred[:, i]))
+                old_metrics["rmse"][col] = float(np.sqrt(mean_squared_error(y_val[:, i], old_y_pred[:, i])))
+                old_metrics["r2"][col] = float(r2_score(y_val[:, i], old_y_pred[:, i]))
+        except Exception as e:
+            print(f"  Could not evaluate old model: {e}")
 
     print_comparison_table(TARGET_COLUMNS, new_metrics, old_metrics)
 
