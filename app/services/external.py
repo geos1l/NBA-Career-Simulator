@@ -1,18 +1,15 @@
 """NBA data access layer.
 
 User-facing functions read from the local SQLite database (populated by
-scripts/ingest_data.py).  The only function that still hits the NBA API is
-get_league_season_per_game(), which is used exclusively by the trainer.
+scripts/ingest_data.py).
 """
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from nba_api.stats.endpoints import leaguedashplayerstats
 
 from app.database import (
     find_player_id_by_name as _db_find_player_id_by_name,
@@ -24,9 +21,6 @@ from app.database import (
     get_player_position as _db_get_player_position,
     search_players as _db_search_players,
 )
-
-# stats.nba.com timeout — only used by trainer via get_league_season_per_game
-NBA_STATS_TIMEOUT = 90
 
 # ---------------------------------------------------------------------------
 # Column mappings — used by the ingestion script when parsing NBA API data
@@ -159,18 +153,3 @@ def get_last_season_averages(player_id: int) -> Optional[Dict[str, Any]]:
     return _db_get_last_season_averages(player_id)
 
 
-# ---------------------------------------------------------------------------
-# Trainer-only function — still hits the NBA API
-# ---------------------------------------------------------------------------
-
-def get_league_season_per_game(
-    season_label: str, min_gp: int = 20, timeout: int = NBA_STATS_TIMEOUT
-) -> pd.DataFrame:
-    frame = leaguedashplayerstats.LeagueDashPlayerStats(
-        season=season_label,
-        per_mode_detailed="PerGame",
-        timeout=timeout,
-    ).get_data_frames()[0]
-    if frame.empty:
-        return frame
-    return frame[frame["GP"] >= min_gp].copy()
