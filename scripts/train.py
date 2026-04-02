@@ -50,29 +50,15 @@ STAT_LABELS = {
 }
 
 
-def _delta_str(new_val: float, old_val: float, lower_is_better: bool = True) -> str:
-    """Return arrow + delta string. ▼ = improved, ▲ = worse."""
-    delta = new_val - old_val
-    if lower_is_better:
-        arrow = "▼" if delta < -0.001 else ("▲" if delta > 0.001 else "═")
-    else:
-        arrow = "▼" if delta > 0.001 else ("▲" if delta < -0.001 else "═")
-    return f"{arrow}{abs(delta):>6.3f}"
-
-
 def print_comparison_table(
     target_cols: list[str],
     new_metrics: dict,
     old_metrics: dict | None,
 ) -> None:
     """Print a formatted comparison table of MAE / RMSE / R² per stat."""
+    header = f"{'Stat':<6} {'MAE':>7} {'RMSE':>7} {'R²':>7}"
     if old_metrics:
-        header = (f"{'Stat':<6} "
-                  f"{'MAE':>7} {'old':>7} {'Δ':>7}  │ "
-                  f"{'RMSE':>7} {'old':>7} {'Δ':>7}  │ "
-                  f"{'R²':>7} {'old':>7} {'Δ':>7}")
-    else:
-        header = f"{'Stat':<6} {'MAE':>7} {'RMSE':>7} {'R²':>7}"
+        header += f"  │ {'Old MAE':>7} {'Δ MAE':>7}"
     print("\n" + "=" * len(header))
     print(header)
     print("-" * len(header))
@@ -82,29 +68,25 @@ def print_comparison_table(
         mae = new_metrics["mae"][col]
         rmse = new_metrics["rmse"][col]
         r2 = new_metrics["r2"][col]
-        if old_metrics and col in old_metrics["mae"]:
+        row = f"{label:<6} {mae:>7.3f} {rmse:>7.3f} {r2:>7.3f}"
+        if old_metrics and col in old_metrics.get("mae", {}):
             old_mae = old_metrics["mae"][col]
-            old_rmse = old_metrics["rmse"][col]
-            old_r2 = old_metrics["r2"][col]
-            row = (f"{label:<6} "
-                   f"{mae:>7.3f} {old_mae:>7.3f} {_delta_str(mae, old_mae):>7}  │ "
-                   f"{rmse:>7.3f} {old_rmse:>7.3f} {_delta_str(rmse, old_rmse):>7}  │ "
-                   f"{r2:>7.3f} {old_r2:>7.3f} {_delta_str(r2, old_r2, lower_is_better=False):>7}")
-        else:
-            row = f"{label:<6} {mae:>7.3f} {rmse:>7.3f} {r2:>7.3f}"
+            delta = mae - old_mae
+            arrow = "▼" if delta < -0.001 else ("▲" if delta > 0.001 else "═")
+            row += f"  │ {old_mae:>7.3f} {arrow}{abs(delta):>6.3f}"
         print(row)
 
     # Averages
-    avg = {k: np.mean([new_metrics[k][c] for c in target_cols]) for k in ("mae", "rmse", "r2")}
+    avg_mae = np.mean([new_metrics["mae"][c] for c in target_cols])
+    avg_rmse = np.mean([new_metrics["rmse"][c] for c in target_cols])
+    avg_r2 = np.mean([new_metrics["r2"][c] for c in target_cols])
     print("-" * len(header))
+    avg_row = f"{'AVG':<6} {avg_mae:>7.3f} {avg_rmse:>7.3f} {avg_r2:>7.3f}"
     if old_metrics:
-        old_avg = {k: np.mean([old_metrics[k][c] for c in target_cols]) for k in ("mae", "rmse", "r2")}
-        avg_row = (f"{'AVG':<6} "
-                   f"{avg['mae']:>7.3f} {old_avg['mae']:>7.3f} {_delta_str(avg['mae'], old_avg['mae']):>7}  │ "
-                   f"{avg['rmse']:>7.3f} {old_avg['rmse']:>7.3f} {_delta_str(avg['rmse'], old_avg['rmse']):>7}  │ "
-                   f"{avg['r2']:>7.3f} {old_avg['r2']:>7.3f} {_delta_str(avg['r2'], old_avg['r2'], lower_is_better=False):>7}")
-    else:
-        avg_row = f"{'AVG':<6} {avg['mae']:>7.3f} {avg['rmse']:>7.3f} {avg['r2']:>7.3f}"
+        old_avg = np.mean([old_metrics["mae"].get(c, 0) for c in target_cols])
+        delta = avg_mae - old_avg
+        arrow = "▼" if delta < -0.001 else ("▲" if delta > 0.001 else "═")
+        avg_row += f"  │ {old_avg:>7.3f} {arrow}{abs(delta):>6.3f}"
     print(avg_row)
     print("=" * len(header))
     print("▼ = improved, ▲ = worse, ═ = same")
