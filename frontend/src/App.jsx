@@ -63,6 +63,10 @@ function App() {
   const [loadSubtext, setLoadSubtext] = useState("");
   const searchRef = useRef(null);
 
+  useEffect(() => {
+    document.title = selected ? `${selected.full_name} | NBA Career Sim` : "NBA Career Simulator";
+  }, [selected]);
+
   const chartData = useMemo(() => {
     if (!career) {
       return [];
