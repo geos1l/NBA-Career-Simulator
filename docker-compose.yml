@@ -4,8 +4,17 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      - app-data:/app/data
       - ./artifacts:/app/artifacts
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  ingestion-cron:
+    build: .
+    volumes:
+      - app-data:/app/data
+    entrypoint: ["bash", "-c", "while true; do echo \"[$(date)] Running weekly ingestion...\"; python scripts/ingest_data.py --active-only --force; echo \"[$(date)] Done. Sleeping 7 days.\"; sleep 604800; done"]
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
@@ -27,7 +36,7 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://umami:umami@umami-db:5432/umami
-      APP_SECRET: ${UMAMI_APP_SECRET:-replace-me-with-a-random-string}
+      APP_SECRET: 6131f68efb29d075032cd3b26d1dfc1629031a5107472e66369abcb8334a5170
     depends_on:
       umami-db:
         condition: service_healthy
@@ -50,3 +59,4 @@ services:
 
 volumes:
   umami-data:
+  app-data:
