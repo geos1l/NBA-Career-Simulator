@@ -176,6 +176,7 @@ function App() {
     setSelected(player);
     setSimResult(null);
     setShowDropdown(false);
+    if (window.umami) window.umami.track("player-search", { player: player.full_name, player_id: player.id });
     try {
       const [careerData, modelData] = await Promise.all([getCareer(player.id), getModelInfo()]);
       setCareer(careerData);
@@ -205,6 +206,7 @@ function App() {
     }
     startProgress("Simulating career…", "determinate");
     setError("");
+    if (window.umami) window.umami.track("simulation", { player: selected.full_name, player_id: selected.id, start_season: simStartSeason });
     try {
       const result = await simulateCareerStream(
         {
