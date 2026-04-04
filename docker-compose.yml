@@ -14,7 +14,7 @@ services:
     build: .
     volumes:
       - app-data:/app/data
-    entrypoint: ["bash", "-c", "while true; do echo \"[$(date)] Running weekly ingestion...\"; python scripts/ingest_data.py --active-only --force; echo \"[$(date)] Done. Sleeping 7 days.\"; sleep 604800; done"]
+    entrypoint: ["bash", "-c", "echo 'Waiting 24 hours before first run to avoid DB lock with initial ingestion...'; sleep 86400; while true; do echo \"[$(date)] Running weekly ingestion...\"; python scripts/ingest_data.py --active-only --force; echo \"[$(date)] Done. Sleeping 7 days.\"; sleep 604800; done"]
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
