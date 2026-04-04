@@ -1,0 +1,48 @@
+{
+  "created_at": "2026-02-12T05:12:58.410292Z",
+  "train_start_year": 2000,
+  "train_end_year": 2024,
+  "rows": 7863,
+  "features": [
+    "age",
+    "gp",
+    "min",
+    "pts",
+    "reb",
+    "ast",
+    "stl",
+    "blk",
+    "tov",
+    "fg_pct",
+    "fg3_pct",
+    "ft_pct"
+  ],
+  "targets": [
+    "next_gp",
+    "next_min",
+    "next_pts",
+    "next_reb",
+    "next_ast",
+    "next_stl",
+    "next_blk",
+    "next_tov",
+    "next_fg_pct",
+    "next_fg3_pct",
+    "next_ft_pct"
+  ],
+  "validation_mae": {
+    "next_gp": 13.03369845798039,
+    "next_min": 4.008407968302984,
+    "next_pts": 2.205862033037831,
+    "next_reb": 0.8701110725530468,
+    "next_ast": 0.5901110721614801,
+    "next_stl": 0.1875889491003376,
+    "next_blk": 0.15115283069358373,
+    "next_tov": 0.3058887897288219,
+    "next_fg_pct": 0.0328991669379114,
+    "next_fg3_pct": 0.07241495805591676,
+    "next_ft_pct": 0.061113436010392354
+  },
+  "version": "v20260212T051258Z",
+  "model_path": "artifacts\\models\\simulator\\v20260212T051258Z\\model.joblib"
+}

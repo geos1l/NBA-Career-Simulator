@@ -1,0 +1,81 @@
+{
+  "version": "v20260329T222629Z",
+  "created_at": "2026-03-29T22:26:38.477061+00:00",
+  "train_start_year": 2010,
+  "train_end_year": 2024,
+  "rows": 3677,
+  "features": [
+    "age",
+    "gp",
+    "min",
+    "pts",
+    "reb",
+    "ast",
+    "stl",
+    "blk",
+    "tov",
+    "fg_pct",
+    "fg3_pct",
+    "ft_pct"
+  ],
+  "targets": [
+    "next_gp",
+    "next_min",
+    "next_pts",
+    "next_reb",
+    "next_ast",
+    "next_stl",
+    "next_blk",
+    "next_tov",
+    "next_fg_pct",
+    "next_fg3_pct",
+    "next_ft_pct"
+  ],
+  "validation_mae": {
+    "next_gp": 12.293977047305868,
+    "next_min": 3.4781311290181383,
+    "next_pts": 2.3047313392809623,
+    "next_reb": 0.8943813062258859,
+    "next_ast": 0.6543955518511517,
+    "next_stl": 0.18552693001486026,
+    "next_blk": 0.15541619919409183,
+    "next_tov": 0.31588893719742744,
+    "next_fg_pct": 0.03444985225163592,
+    "next_fg3_pct": 0.06308534011830026,
+    "next_ft_pct": 0.06158142632802934
+  },
+  "validation_rmse": {
+    "next_gp": 15.154902258072187,
+    "next_min": 4.590704019176833,
+    "next_pts": 2.9825696146473555,
+    "next_reb": 1.1971441851047115,
+    "next_ast": 0.9243511205471342,
+    "next_stl": 0.23934356446155672,
+    "next_blk": 0.2238014290681949,
+    "next_tov": 0.4231964781827095,
+    "next_fg_pct": 0.04765693741337653,
+    "next_fg3_pct": 0.1034152694417001,
+    "next_ft_pct": 0.0922437919381778
+  },
+  "validation_r2": {
+    "next_gp": 0.07419159076912529,
+    "next_min": 0.6770475642308192,
+    "next_pts": 0.7966037643356167,
+    "next_reb": 0.7667701781266603,
+    "next_ast": 0.7811369169619156,
+    "next_stl": 0.6183695680612523,
+    "next_blk": 0.7493493237432166,
+    "next_tov": 0.7423970485699493,
+    "next_fg_pct": 0.5730607233817244,
+    "next_fg3_pct": 0.3809521108935039,
+    "next_ft_pct": 0.34358131838765604
+  },
+  "hyperparameters": {
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "max_iter": 500,
+    "min_samples_leaf": 10,
+    "test_size": 0.2
+  },
+  "model_path": "artifacts\\models\\simulator\\v20260329T222629Z\\model.joblib"
+}
