@@ -6,6 +6,8 @@ A full-stack NBA career simulator that projects what a player's career would loo
 
 Search any NBA player, view their full career stats, and simulate their career from any point (year 3+) to see what they could have been. Tmac 💔
 
+<img width="1929" height="1617" alt="Screenshot 2026-04-07 044314" src="https://github.com/user-attachments/assets/75520766-2e13-483b-b437-5cb2f176abba" />
+
 ## What it does
 
 - Search 5,000+ NBA players by name
