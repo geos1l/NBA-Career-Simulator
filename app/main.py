@@ -191,6 +191,14 @@ frontend_dist = Path("frontend/dist")
 if frontend_dist.exists():
     app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
 
+    @app.get("/nba-logo.png")
+    def nba_logo() -> FileResponse:
+        return FileResponse(frontend_dist / "nba-logo.png")
+
+    @app.get("/favicon.png")
+    def favicon() -> FileResponse:
+        return FileResponse(frontend_dist / "favicon.png")
+
     @app.get("/")
     def home() -> FileResponse:
         return FileResponse(frontend_dist / "index.html")
