@@ -236,12 +236,18 @@ function App() {
 
   return (
     <div className="app">
-      <header className="header">
+      <header className={`header${!career ? " header--home" : ""}`}>
+        <img
+          src="/nba-logo.png"
+          alt="NBA Logo"
+          className="nbaLogo"
+          onClick={() => { setSelected(null); setCareer(null); setSimResult(null); setQuery(""); setError(""); }}
+        />
         <h1 style={{ cursor: "pointer" }} onClick={() => { setSelected(null); setCareer(null); setSimResult(null); setQuery(""); setError(""); }}>NBA Career Simulator</h1>
-        <p>Monte Carlo projection engine with dynamic retirement modeling.</p>
+        <p>Injury-free career simulations for every NBA player</p>
       </header>
 
-      <section className="searchBar" ref={searchRef}>
+      <section className={`searchBar${!career ? " searchBar--home" : ""}`} ref={searchRef}>
         <form onSubmit={handleSearch}>
           <input
             value={query}

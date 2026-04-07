@@ -23,6 +23,22 @@ body {
   margin-bottom: 16px;
 }
 
+.header--home {
+  text-align: center;
+  margin-top: 80px;
+  margin-bottom: 24px;
+}
+
+.nbaLogo {
+  height: 80px;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.header--home .nbaLogo {
+  height: 120px;
+}
+
 .header h1 {
   margin: 0 0 8px;
 }
@@ -74,6 +90,10 @@ button:disabled {
 .searchBar {
   position: relative;
   max-width: 420px;
+}
+
+.searchBar--home {
+  margin: 0 auto;
 }
 
 .searchDropdown {
